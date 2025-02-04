@@ -11,4 +11,6 @@ const openai = new OpenAI({
 });
 
 
-bot.onText();
+bot.onText(/\/start/, async (msg) => {
+    await bot.sendMessage(msg.from!.id, "Hello, I am your personal assistant!")
+});
