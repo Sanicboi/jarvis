@@ -182,6 +182,8 @@ class Assistant {
     for await (const event of stream) {
       this.handler.emit("event", event);
     }
+
+    this.handler.removeAllListeners();
   }
 }
 
