@@ -188,6 +188,39 @@ class Assistant {
       handler.emit("event", event);
     }
   }
+
+  public async respondPhoto(url: string, user: number, caption?: string) {
+    let c: OpenAI.Beta.Threads.Messages.MessageContentPartParam[] = [
+      {
+        image_url: {
+          url,
+          detail: 'high'
+        },
+        type: 'image_url'
+      },
+    ];
+    if (caption) c.push({
+      text: caption,
+      type: "text"
+    });
+    await openai.beta.threads.messages.create(this.thread, {
+      content: c,
+      role: "user",
+    });
+
+    const handler = new EventHandler(this.id);
+    handler.user = user;
+
+    handler.on("event", handler.onEvent.bind(handler));
+
+    const stream = openai.beta.threads.runs.stream(this.thread, {
+      assistant_id: this.id,
+    });
+
+    for await (const event of stream) {
+      handler.emit("event", event);
+    }
+  }
 }
 
 const asst = new Assistant();
@@ -207,6 +240,17 @@ bot.onText(/./, async (msg) => {
 
   await asst.respond(msg.text, msg.from.id);
 });
+
+bot.on("photo", async (msg) => {
+  if (!msg.from?.username || !whiteList.includes(msg.from?.username)) {
+    return await bot.sendMessage(msg.from!.id, "No access");
+  }
+
+  if (!msg.photo) return;
+  const highest = msg.photo.sort((a, b) => b.height*b.width - a.height*a.width);
+  const url = await bot.getFileLink(highest[0].file_id);
+  await asst.respondPhoto(url, msg.from.id, msg.caption);
+})
 
 bot.onText(/\/reset/, async (msg) => {
   if (!msg.from?.username || !whiteList.includes(msg.from?.username)) {
