@@ -6,9 +6,12 @@ import { EventEmitter } from "stream";
 import dayjs from "dayjs";
 import schedule from "node-schedule";
 import { RunSubmitToolOutputsParamsStream } from "openai/lib/AssistantStream";
-import { error } from "console";
-require("dotenv").config();
+import utc from "dayjs/plugin/utc";
+import cformat from "dayjs/plugin/customParseFormat"
 
+require("dotenv").config();
+dayjs.extend(utc)
+dayjs.extend(cformat)
 const whiteList = ["Sanicboii"];
 
 const bot = new TelegramBot(process.env.TG_KEY!, {
@@ -87,9 +90,12 @@ class EventHandler extends EventEmitter {
       for (const call of data.required_action.submit_tool_outputs.tool_calls) {
         if (call.function.name === "schedule") {
           const input: IScheduleData = JSON.parse(call.function.arguments);
-          const date = new Date(`${input.date} ${input.time}`);
-          schedule.scheduleJob(input.name, date, async () => {
-            await bot.sendMessage(this.user, `${input.name}.\n${input.data}`);
+          const date = dayjs(`${input.date} ${input.time}`, "DD/MM/YYYY HH:mm");
+          console.log(input);
+          console.log(date.toDate());
+          schedule.scheduleJob(date.toDate(), async () => {
+            console.log("Scheduled job");
+            await bot.sendMessage(this.user, `${input.name}\n${input.data}`);
           });
           res.tool_outputs.push({
             output: "Event scheduled successfully",
@@ -128,7 +134,6 @@ class Assistant {
   private id: string = "asst_anu01W3oy2AAVZ3Qx5wHDR8v";
   private thread: string;
   private file = path.join(process.cwd(), ".thread");
-  private handler: EventHandler = new EventHandler(this.id);
 
   constructor() {
     try {
@@ -170,20 +175,18 @@ class Assistant {
       content: text,
       role: "user",
     });
+    const handler = new EventHandler(this.id);
+    handler.user = user;
 
-    this.handler.user = user;
-
-    this.handler.on("event", this.handler.onEvent.bind(this.handler));
+    handler.on("event", handler.onEvent.bind(handler));
 
     const stream = openai.beta.threads.runs.stream(this.thread, {
       assistant_id: this.id,
     });
 
     for await (const event of stream) {
-      this.handler.emit("event", event);
+      handler.emit("event", event);
     }
-
-    this.handler.removeAllListeners();
   }
 }
 
