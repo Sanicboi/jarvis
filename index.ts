@@ -61,7 +61,11 @@ class EventHandler extends EventEmitter {
   private async onMessage(data: OpenAI.Beta.Threads.Messages.Message) {
     for (const c of data.content) {
       if (c.type === "text") {
-        await bot.sendMessage(this.user, c.text.value, {
+        let t = c.text.value;
+        for (const ann of c.text.annotations) {
+          t.replace(ann.text, "");
+        }
+        await bot.sendMessage(this.user, t, {
           parse_mode: "Markdown",
         });
       } else if (c.type === "image_url") {
