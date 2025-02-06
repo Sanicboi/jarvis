@@ -7,11 +7,14 @@ import dayjs from "dayjs";
 import schedule from "node-schedule";
 import { RunSubmitToolOutputsParamsStream } from "openai/lib/AssistantStream";
 import utc from "dayjs/plugin/utc";
-import cformat from "dayjs/plugin/customParseFormat"
+import cformat from "dayjs/plugin/customParseFormat";
+import axios, { AxiosResponse } from "axios";
+import { v4 } from "uuid";
+import mime from "mime-types";
 
 require("dotenv").config();
-dayjs.extend(utc)
-dayjs.extend(cformat)
+dayjs.extend(utc);
+dayjs.extend(cformat);
 const whiteList = ["Sanicboii"];
 
 const bot = new TelegramBot(process.env.TG_KEY!, {
@@ -134,11 +137,15 @@ class Assistant {
   private id: string = "asst_anu01W3oy2AAVZ3Qx5wHDR8v";
   private thread: string;
   private file = path.join(process.cwd(), ".thread");
+  private file2 = path.join(process.cwd(), ".files");
 
   constructor() {
     try {
       const files = fs.readdirSync(process.cwd());
       if (!files.includes(".thread")) {
+        fs.writeFileSync(this.file, "");
+      }
+      if (!files.includes(".files")) {
         fs.writeFileSync(this.file, "");
       }
       const data = fs.readFileSync(this.file, "utf-8");
@@ -164,8 +171,22 @@ class Assistant {
     fs.writeFileSync(this.file, this.thread);
   }
 
+  private async deleteFiles() {
+    const files = fs.readFileSync(this.file2, "utf-8").split("\n");
+    for (const f of files) {
+      if (!f) continue;
+      try {
+        await openai.files.del(f);
+      } catch (error) {
+        console.error("Error deleting file:", error);
+      }
+    }
+    fs.writeFileSync(this.file2, "");
+  }
+
   public async updateThread() {
     await openai.beta.threads.del(this.thread);
+    await this.deleteFiles();
     await this.createNewThread();
     this.updateThreadFile();
   }
@@ -194,18 +215,67 @@ class Assistant {
       {
         image_url: {
           url,
-          detail: 'high'
+          detail: "high",
         },
-        type: 'image_url'
+        type: "image_url",
       },
     ];
-    if (caption) c.push({
-      text: caption,
-      type: "text"
-    });
+    if (caption)
+      c.push({
+        text: caption,
+        type: "text",
+      });
     await openai.beta.threads.messages.create(this.thread, {
       content: c,
       role: "user",
+    });
+
+    const handler = new EventHandler(this.id);
+    handler.user = user;
+
+    handler.on("event", handler.onEvent.bind(handler));
+
+    const stream = openai.beta.threads.runs.stream(this.thread, {
+      assistant_id: this.id,
+    });
+
+    for await (const event of stream) {
+      handler.emit("event", event);
+    }
+  }
+
+  public async respondDocument(url: string, user: number, caption?: string) {
+    const res: AxiosResponse = await axios.get(url, {
+      responseType: "arraybuffer",
+    });
+    const b = Buffer.from(res.data);
+    const ext = path.extname(url);
+    const type = mime.lookup(ext);
+    if (!type) throw new Error("Unknown file extension");
+    const file = new File([b], v4() + ext, {
+      type,
+    });
+
+    const f = await openai.files.create({
+      file,
+      purpose: "assistants",
+    });
+
+    fs.appendFileSync(this.file2, f.id + "\n");
+
+    await openai.beta.threads.messages.create(this.thread, {
+      content: caption ?? "Input data",
+      role: "user",
+      attachments: [
+        {
+          file_id: f.id,
+          tools: [
+            {
+              type: "file_search",
+            },
+          ],
+        },
+      ],
     });
 
     const handler = new EventHandler(this.id);
@@ -247,10 +317,20 @@ bot.on("photo", async (msg) => {
   }
 
   if (!msg.photo) return;
-  const highest = msg.photo.sort((a, b) => b.height*b.width - a.height*a.width);
+  const highest = msg.photo.sort(
+    (a, b) => b.height * b.width - a.height * a.width,
+  );
   const url = await bot.getFileLink(highest[0].file_id);
   await asst.respondPhoto(url, msg.from.id, msg.caption);
-})
+});
+
+bot.on("document", async (msg) => {
+  if (!msg.from?.username || !whiteList.includes(msg.from?.username)) {
+    return await bot.sendMessage(msg.from!.id, "No access");
+  }
+
+  if (!msg.document) return;
+});
 
 bot.onText(/\/reset/, async (msg) => {
   if (!msg.from?.username || !whiteList.includes(msg.from?.username)) {
