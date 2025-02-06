@@ -16,6 +16,17 @@ require("dotenv").config();
 dayjs.extend(utc);
 dayjs.extend(cformat);
 const whiteList = ["Sanicboii"];
+const audioFormats = [
+  ".flac",
+  ".mp3",
+  ".mp4",
+  ".mpeg",
+  ".mpga",
+  ".m4a",
+  ".ogg",
+  ".wav",
+  ".webm",
+].map((el) => mime.lookup(el));
 
 const bot = new TelegramBot(process.env.TG_KEY!, {
   polling: true,
@@ -256,31 +267,46 @@ class Assistant {
     const ext = path.extname(url);
     const type = mime.lookup(ext);
     if (!type) throw new Error("Unknown file extension");
-    const file = new File([b], v4() + ext, {
+    const name = v4() + ext;
+    const file = new File([b], name, {
       type,
     });
+    if (audioFormats.includes(type)) {
+      const src = path.join(process.cwd(), "audio", name);
+      fs.writeFileSync(src, b);
+      const transcription = await openai.audio.transcriptions.create({
+        model: "whisper-1",
+        file: fs.createReadStream(src),
+      });
+      fs.rmSync(src);
 
-    const f = await openai.files.create({
-      file,
-      purpose: "assistants",
-    });
+      await openai.beta.threads.messages.create(this.thread, {
+        content: transcription.text,
+        role: "user",
+      });
+    } else {
+      const f = await openai.files.create({
+        file,
+        purpose: "assistants",
+      });
 
-    fs.appendFileSync(this.file2, f.id + "\n");
+      fs.appendFileSync(this.file2, f.id + "\n");
 
-    await openai.beta.threads.messages.create(this.thread, {
-      content: caption ?? "Input data",
-      role: "user",
-      attachments: [
-        {
-          file_id: f.id,
-          tools: [
-            {
-              type: "file_search",
-            },
-          ],
-        },
-      ],
-    });
+      await openai.beta.threads.messages.create(this.thread, {
+        content: caption ?? "Input data",
+        role: "user",
+        attachments: [
+          {
+            file_id: f.id,
+            tools: [
+              {
+                type: "file_search",
+              },
+            ],
+          },
+        ],
+      });
+    }
 
     const handler = new EventHandler(this.id);
     handler.user = user;
