@@ -334,6 +334,9 @@ bot.on("document", async (msg) => {
   }
 
   if (!msg.document) return;
+
+  const url = await bot.getFileLink(msg.document.file_id);
+  await asst.respondDocument(url, msg.from.id, msg.caption);
 });
 
 bot.onText(/\/reset/, async (msg) => {
