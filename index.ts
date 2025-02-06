@@ -208,11 +208,7 @@ class Assistant {
     this.updateThreadFile();
   }
 
-  public async respond(text: string, user: number) {
-    await openai.beta.threads.messages.create(this.thread, {
-      content: text,
-      role: "user",
-    });
+  private async respond(user: number) {
     const handler = new EventHandler(this.id);
     handler.user = user;
 
@@ -227,7 +223,7 @@ class Assistant {
     }
   }
 
-  public async respondPhoto(url: string, user: number, caption?: string) {
+  private async addPhoto(url: string, caption?: string) {
     let c: OpenAI.Beta.Threads.Messages.MessageContentPartParam[] = [
       {
         image_url: {
@@ -246,35 +242,15 @@ class Assistant {
       content: c,
       role: "user",
     });
-
-    const handler = new EventHandler(this.id);
-    handler.user = user;
-
-    handler.on("event", handler.onEvent.bind(handler));
-
-    const stream = openai.beta.threads.runs.stream(this.thread, {
-      assistant_id: this.id,
-    });
-
-    for await (const event of stream) {
-      handler.emit("event", event);
-    }
   }
 
-  public async respondDocument(url: string, user: number, caption?: string) {
-    const res: AxiosResponse = await axios.get(url, {
-      responseType: "arraybuffer",
+  private async addAudio(url: string, ext: string) {
+    const res = await axios.get(url, {
+      responseType: "arraybuffer"
     });
     const b = Buffer.from(res.data);
-    const ext = path.extname(url);
-    const type = mime.lookup(ext);
-    if (!type) throw new Error("Unknown file extension");
     const name = v4() + ext;
-    const file = new File([b], name, {
-      type,
-    });
-    if (audioFormats.includes(type)) {
-      const src = path.join(process.cwd(), "audio", name);
+    const src = path.join(process.cwd(), "audio", name);
       fs.writeFileSync(src, b);
       const transcription = await openai.audio.transcriptions.create({
         model: "whisper-1",
@@ -286,26 +262,40 @@ class Assistant {
         content: transcription.text,
         role: "user",
       });
+  }
+
+  public async respondText(text: string, user: number) {
+    await openai.beta.threads.messages.create(this.thread, {
+      content: text,
+      role: "user",
+    });
+    await this.respond(user);
+  }
+
+  public async respondPhoto(url: string, user: number, caption?: string) {
+    await this.addPhoto(url, caption);
+    await this.respond(user);
+  }
+
+  public async respondDocument(url: string, user: number, caption?: string) {
+
+    const ext = path.extname(url);
+    const type = mime.lookup(ext);
+    if (!type) throw new Error("Unknown file extension");
+
+    if (audioFormats.includes(type)) {
+      await this.addAudio(url, ext);
     } else if (imageFormats.includes(ext)) {
-      let c: OpenAI.Beta.Threads.Messages.MessageContentPartParam[] = [
-        {
-          image_url: {
-            url,
-            detail: "high",
-          },
-          type: "image_url",
-        },
-      ];
-      if (caption)
-        c.push({
-          text: caption,
-          type: "text",
-        });
-      await openai.beta.threads.messages.create(this.thread, {
-        content: c,
-        role: "user",
-      });
+      await this.addPhoto(url, caption);
     } else {
+      const res: AxiosResponse = await axios.get(url, {
+        responseType: "arraybuffer",
+      });
+      const b = Buffer.from(res.data);
+      const name = v4() + ext;
+      const file = new File([b], name, {
+        type,
+      });
       const f = await openai.files.create({
         file,
         purpose: "assistants",
@@ -329,21 +319,15 @@ class Assistant {
       });
     }
 
-    const handler = new EventHandler(this.id);
-    handler.user = user;
+    await this.respond(user);
+  }
 
-    handler.on("event", handler.onEvent.bind(handler));
 
-    const stream = openai.beta.threads.runs.stream(this.thread, {
-      assistant_id: this.id,
-    });
-
-    for await (const event of stream) {
-      handler.emit("event", event);
-    }
+  public async respondVoice(url: string, user: number) {
+    await this.addAudio(url, ".ogg");
+    await this.respond(user);
   }
 }
-
 const asst = new Assistant();
 
 bot.onText(/\/start/, async (msg) => {
@@ -359,7 +343,7 @@ bot.onText(/./, async (msg) => {
   }
   if (!msg.text || msg.text?.startsWith("/")) return;
 
-  await asst.respond(msg.text, msg.from.id);
+  await asst.respondText(msg.text, msg.from.id);
 });
 
 bot.on("photo", async (msg) => {
@@ -384,6 +368,17 @@ bot.on("document", async (msg) => {
 
   const url = await bot.getFileLink(msg.document.file_id);
   await asst.respondDocument(url, msg.from.id, msg.caption);
+});
+
+bot.on("voice", async (msg) => {
+  if (!msg.from?.username || !whiteList.includes(msg.from?.username)) {
+    return await bot.sendMessage(msg.from!.id, "No access");
+  }
+
+  if (!msg.voice) return;
+
+  const url = await bot.getFileLink(msg.voice.file_id);
+  await asst.respondVoice(url, msg.from.id);
 });
 
 bot.onText(/\/reset/, async (msg) => {
