@@ -28,6 +28,8 @@ const audioFormats = [
   ".webm",
 ].map((el) => mime.lookup(el));
 
+const imageFormats = [".png", ".jpeg", ".gif"];
+
 const bot = new TelegramBot(process.env.TG_KEY!, {
   polling: true,
 });
@@ -282,6 +284,25 @@ class Assistant {
 
       await openai.beta.threads.messages.create(this.thread, {
         content: transcription.text,
+        role: "user",
+      });
+    } else if (imageFormats.includes(ext)) {
+      let c: OpenAI.Beta.Threads.Messages.MessageContentPartParam[] = [
+        {
+          image_url: {
+            url,
+            detail: "high",
+          },
+          type: "image_url",
+        },
+      ];
+      if (caption)
+        c.push({
+          text: caption,
+          type: "text",
+        });
+      await openai.beta.threads.messages.create(this.thread, {
+        content: c,
         role: "user",
       });
     } else {
