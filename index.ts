@@ -15,6 +15,8 @@ import mime from "mime-types";
 require("dotenv").config();
 dayjs.extend(utc);
 dayjs.extend(cformat);
+
+let format: "txt" | "html" | "docx" = "txt";
 const whiteList = ["Sanicboii"];
 const audioFormats = [
   ".flac",
@@ -76,7 +78,7 @@ class EventHandler extends EventEmitter {
       if (c.type === "text") {
         let t = c.text.value;
         for (const ann of c.text.annotations) {
-          t.replace(ann.text, "");
+          t = t.replace(ann.text, "");
         }
         await bot.sendMessage(this.user, t, {
           parse_mode: "Markdown",
@@ -163,7 +165,7 @@ class Assistant {
         fs.writeFileSync(this.file, "");
       }
       if (!files.includes(".files")) {
-        fs.writeFileSync(this.file, "");
+        fs.writeFileSync(this.file2, "");
       }
       const data = fs.readFileSync(this.file, "utf-8");
       if (!data) {
@@ -266,7 +268,7 @@ class Assistant {
 
   public async respondText(text: string, user: number) {
     await openai.beta.threads.messages.create(this.thread, {
-      content: text,
+      content: text + "\n" + `Response format: ${format}`,
       role: "user",
     });
     await this.respond(user);
@@ -388,3 +390,13 @@ bot.onText(/\/reset/, async (msg) => {
 
   await asst.updateThread();
 });
+
+
+bot.onText(/\/format/, async (msg) => {
+  if (!msg.from?.username || !whiteList.includes(msg.from?.username)) {
+    return await bot.sendMessage(msg.from!.id, "No access");
+  }
+  const f = msg.text?.split(" ")[1];
+  if (!f || (f !== "txt" && f !== "docx" && f !== "html")) return await bot.sendMessage(msg.from!.id, "Wrong format");
+  format = f;
+})
